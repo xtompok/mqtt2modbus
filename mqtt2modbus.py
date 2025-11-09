@@ -14,6 +14,7 @@ from pymodbus.client import ModbusSerialClient as ModbusClient
 from pymodbus.exceptions import ModbusIOException
 
 import paho.mqtt.client as mqtt_client
+from paho.mqtt.enums import CallbackAPIVersion
 from utils import ModbusFunc, ModbusMsg, ModbusMsgBlock, ModuleStatus
 
 MODBUS_PORT='/dev/serial_lights'
@@ -44,7 +45,7 @@ logger.info("Starting up...")
 
 mqtt_queue = Queue()
 
-def on_connect(client, userdara, flags, rc):
+def on_connect(client, userdara, flags, rc, properties):
 	logger.info(f"Connected to MQTT with result {rc}")
 	mqtt.subscribe('modbus/#')
 
@@ -74,26 +75,26 @@ def led_message(topic, userdata, msg):
 def send_modbus_message(msg:ModbusMsg):
 	if isinstance(msg, ModbusMsg):
 		if msg.func == ModbusFunc.SET_HOLDING:
-			rq = client.write_registers(msg.reg, [msg.val], slave=msg.unit)
+			rq = client.write_registers(msg.reg, [msg.val], device_id=msg.unit)
 
 	if isinstance(msg, ModbusMsgBlock):
 		resps = []
 		for m in msg.msgs:
 			if m.func == ModbusFunc.READ_HOLDING:
-				rq = client.read_holding_registers(m.reg, m.nregs, slave=m.unit)
+				rq = client.read_holding_registers(m.reg, count=m.nregs, device_id=m.unit)
 				if type(rq) == ModbusIOException:
 					logger.warning(f"Unit {m.unit} got ModbusIOException: {rq}")
 					return 
 				resps.append(rq.registers)
 			if m.func == ModbusFunc.READ_INPUT:
-				rq = client.read_input_registers(m.reg, m.nregs, slave=m.unit)
+				rq = client.read_input_registers(m.reg, count=m.nregs, device_id=m.unit)
 				if type(rq) == ModbusIOException:
 					logger.warning(f"Unit {m.unit} ModbusIOException: {rq}")
 					return
 				resps.append(rq.registers)
 
 			if m.func == ModbusFunc.SET_HOLDING:
-				rq = client.write_registers(m.reg, [m.val], slave=m.unit)
+				rq = client.write_registers(m.reg, [m.val], device_id=m.unit)
 				if type(rq) == ModbusIOException:
 					logger.warning(f"Unit {m.unit} ModbusIOException: {rq}")
 					return
@@ -115,7 +116,7 @@ def read_status_regs():
 	threading.Timer(1,read_status_regs).start()
 
 
-mqtt = mqtt_client.Client()
+mqtt = mqtt_client.Client(CallbackAPIVersion.VERSION2)
 mqtt.on_connect = on_connect
 mqtt.on_message = on_message
 
