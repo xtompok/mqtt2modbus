@@ -1,0 +1,19 @@
+[Unit]
+Description=Daemon for translating messages from MQTT to Modbus
+
+[Service]
+Type=notify
+WorkingDirectory=/home/automation/mqtt2modbus
+ExecStart=/home/automation/venv/bin/python3 mqtt2modbus.py
+
+# Restart every >2 seconds to avoid StartLimitInterval failure
+RestartSec=5
+Restart=always
+
+StandardOutput=null
+StandardError=journal
+SyslogIdentifier=mqtt2modbus
+
+[Install]
+WantedBy=default.target
+
