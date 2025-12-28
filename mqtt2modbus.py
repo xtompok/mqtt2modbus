@@ -15,11 +15,13 @@ from pymodbus.exceptions import ModbusIOException
 
 import paho.mqtt.client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
-from utils import ModbusFunc, ModbusMsg, ModbusMsgBlock, ModuleStatus
+from utils import ModbusFunc, ModbusMsg, ModbusMsgBlock, ModuleStatus, ThermometerData, load_config
 
 MODBUS_PORT='/dev/serial_lights'
 
 UNITS=[2,4,5,6,7,8,9]
+
+therm_names = load_config("therm_names")
 
 def _log_uncaught(atype, value, tb):
 	logger.error(f"Uncaught exception: {str(atype)} : {value}", exc_info=(atype, value, tb))
@@ -99,6 +101,7 @@ def send_modbus_message(msg:ModbusMsg):
 					logger.warning(f"Unit {m.unit} ModbusIOException: {rq}")
 					return
 				resps.append(rq.registers)
+		logger.info((m.unit,resps))
 		msg.callback(m.unit,resps)
 
 def publish_status_regs(unit,resp):
@@ -107,12 +110,27 @@ def publish_status_regs(unit,resp):
 	mqtt.publish("modbus/status", json.dumps(msg))
 	logger.debug(unit,status) 
 
+def publish_thermometer(unit,resps):
+	for resp in resps:
+		data = ThermometerData.from_regs(resp,therm_names)
+		if data is None:
+			return
+		msg = {"id": "modbus", "type": "thermometer", "unit": unit, "timestamp": time.time()} | data.to_dict()
+		mqtt.publish("modbus/thermometer", json.dumps(msg))
+		logger.debug((unit,data))
+
+
+
 def read_status_regs():
 	for unit in UNITS:
 		msgs = []
 		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 5, nregs=4))
 		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_HOLDING, reg = 1, nregs=2))
 		mqtt_queue.put(ModbusMsgBlock(msgs=msgs, callback=publish_status_regs))
+		msgs = []
+		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 200, nregs=5))
+		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 205, nregs=5))
+		mqtt_queue.put(ModbusMsgBlock(msgs=msgs, callback=publish_thermometer))
 	threading.Timer(1,read_status_regs).start()
 
 
