@@ -4,7 +4,7 @@ Description=Daemon for translating messages from MQTT to Modbus
 [Service]
 Type=notify
 WorkingDirectory=/home/automation/mqtt2modbus
-ExecStart=/home/automation/venv/bin/python3 mqtt2modbus.py
+ExecStart=/home/automation/venv/bin/python3 mqtt2modbus.py --config %I
 
 # Restart every >2 seconds to avoid StartLimitInterval failure
 RestartSec=5

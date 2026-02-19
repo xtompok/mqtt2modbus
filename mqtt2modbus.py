@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 
 import logging
-from queue import Queue
+from queue import PriorityQueue
 import threading
 import time
 import json
 import sys
 import os
 import signal
+import click
 import systemd.daemon as sysd
 
 from pymodbus.client import ModbusSerialClient as ModbusClient
@@ -17,11 +18,6 @@ import paho.mqtt.client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
 from utils import ModbusFunc, ModbusMsg, ModbusMsgBlock, ModuleStatus, ThermometerData, load_config
 
-MODBUS_PORT='/dev/serial_lights'
-
-UNITS=[2,4,5,6,7,8,9]
-
-therm_names = load_config("therm_names")
 
 def _log_uncaught(atype, value, tb):
 	logger.error(f"Uncaught exception: {str(atype)} : {value}", exc_info=(atype, value, tb))
@@ -43,13 +39,10 @@ threading.excepthook = _handle_uncaught_th
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mqtt2modbus")
 
-logger.info("Starting up...")
-
-mqtt_queue = Queue()
 
 def on_connect(client, userdara, flags, rc, properties):
 	logger.info(f"Connected to MQTT with result {rc}")
-	mqtt.subscribe('modbus/#')
+	client.subscribe('modbus/#')
 
 def on_message(client, userdata, msg):
 	top = msg.topic.split("/")[1:]
@@ -61,7 +54,7 @@ def led_message(topic, userdata, msg):
 	unit = int(topic[0])
 	#print(f"{unit=}")
 	if topic[1] == 'set':
-		msg = ModbusMsg(unit=unit, func=ModbusFunc.SET_HOLDING, reg = 0, val =int(msg.payload))
+		msg = ModbusMsg(unit=unit, func=ModbusFunc.SET_HOLDING, reg = 0, val =int(msg.payload),priority=5)
 		if topic[2] == 'pwm0':
 			msg.reg = 10
 			mqtt_queue.put(msg)
@@ -75,6 +68,8 @@ def led_message(topic, userdata, msg):
 		pass
 
 def send_modbus_message(msg:ModbusMsg):
+	logger.info(f"Sending meesage {msg}")
+	start = time.time()
 	if isinstance(msg, ModbusMsg):
 		if msg.func == ModbusFunc.SET_HOLDING:
 			rq = client.write_registers(msg.reg, [msg.val], device_id=msg.unit)
@@ -101,8 +96,9 @@ def send_modbus_message(msg:ModbusMsg):
 					logger.warning(f"Unit {m.unit} ModbusIOException: {rq}")
 					return
 				resps.append(rq.registers)
-		logger.info((m.unit,resps))
+		logger.info(f"Unit: {m.unit}, responses: {resps}")
 		msg.callback(m.unit,resps)
+	logger.info(f"Took {time.time()-start:.2} seconds")
 
 def publish_status_regs(unit,resp):
 	status = ModuleStatus.from_regs(resp)
@@ -133,29 +129,52 @@ def read_status_regs():
 		mqtt_queue.put(ModbusMsgBlock(msgs=msgs, callback=publish_thermometer))
 	threading.Timer(1,read_status_regs).start()
 
-
-mqtt = mqtt_client.Client(CallbackAPIVersion.VERSION2)
-mqtt.on_connect = on_connect
-mqtt.on_message = on_message
-
-mqtt.connect("localhost", 1883, keepalive=60)
-
-mqtt.loop_start()
-
-client = ModbusClient(
-			port=MODBUS_PORT, 
-			timeout=1,
-			baudrate=115200)
-client.connect()
-
-threading.Timer(1,read_status_regs).start()
-
-sysd.notify("READY=1")
+@click.command()
+@click.option('--config', default="default", type=str, help="Config file to use")
+def main(config):
+	global UNITS
+	global mqtt
+	global mqtt_queue
+	global client
+	global therm_names
 
 
-while True:
-	msg = mqtt_queue.get()
-	
-	send_modbus_message(msg)
+	logger.info("Starting up...")
 
-	mqtt_queue.task_done()
+	cfg = load_config(config,subpath="mqtt2modbus")
+	UNITS = cfg["units"]
+
+
+	therm_names = load_config("therm_names")
+
+	mqtt_queue = PriorityQueue()
+
+	mqtt = mqtt_client.Client(CallbackAPIVersion.VERSION2)
+	mqtt.on_connect = on_connect
+	mqtt.on_message = on_message
+
+	mqtt.connect("localhost", 1883, keepalive=60)
+
+	mqtt.loop_start()
+
+	client = ModbusClient(
+				port=cfg["port"]["path"], 
+				timeout=cfg["port"].get("timeout",0.1),
+				baudrate=cfg["port"].get("baudrate",115200))
+	client.connect()
+
+	threading.Timer(1,read_status_regs).start()
+
+	sysd.notify("READY=1")
+
+
+	while True:
+		msg = mqtt_queue.get()
+		logger.info(f"In queue: {mqtt_queue.qsize()}")
+		
+		send_modbus_message(msg)
+
+		mqtt_queue.task_done()
+
+if __name__ == "__main__":
+	main(standalone_mode=False)

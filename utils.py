@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Callable
 from pathlib import Path
+from functools import total_ordering
 import yaml
 
 CONFIG_DIR = 'config'
@@ -13,17 +14,26 @@ class ModbusFunc(Enum):
 
 
 @dataclass
+@total_ordering
 class ModbusMsg(object):
 	func: ModbusFunc
 	unit: int
 	reg: int
 	val: int = None
 	nregs: int = 0
+	priority: int = 10
+
+	def __lt__(self,other):
+		return self.priority < other.priority
 
 @dataclass
 class ModbusMsgBlock(object):
 	msgs: list
 	callback: Callable[[int,list],None]
+	priority: int = 10
+
+	def __lt__(self,other):
+		return self.priority < other.priority
 
 @dataclass
 class ModuleStatus(object):
@@ -66,8 +76,8 @@ class ThermometerData(object):
 	def to_dict(self):
 		return {"address": self.address, "temperature": self.temperature, "name": self.name}
 
-def load_config(filename):
-	basedir = Path.home() / Path(CONFIG_DIR)
+def load_config(filename,subpath=""):
+	basedir = Path.home() / Path(CONFIG_DIR) / subpath
 	filename = Path(filename)
 	if filename.suffix == '':
 		filename = filename.with_suffix('.yaml')
