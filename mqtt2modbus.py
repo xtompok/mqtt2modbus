@@ -18,7 +18,6 @@ import paho.mqtt.client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
 from utils import ModbusFunc, ModbusMsg, ModbusMsgBlock, ModuleStatus, ThermometerData, load_config
 
-
 def _log_uncaught(atype, value, tb):
 	logger.error(f"Uncaught exception: {str(atype)} : {value}", exc_info=(atype, value, tb))
 	os.kill(os.getpid(), signal.SIGKILL)
@@ -38,7 +37,6 @@ threading.excepthook = _handle_uncaught_th
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("mqtt2modbus")
-
 
 def on_connect(client, userdara, flags, rc, properties):
 	logger.info(f"Connected to MQTT with result {rc}")
@@ -104,7 +102,7 @@ def publish_status_regs(unit,resp):
 	status = ModuleStatus.from_regs(resp)
 	msg = {"id": "modbus", "type": "status", "unit": unit, "timestamp": time.time()} | status.to_dict()
 	mqtt.publish("modbus/status", json.dumps(msg))
-	logger.debug(unit,status) 
+	logger.debug((unit,status))
 
 def publish_thermometer(unit,resps):
 	for resp in resps:
@@ -131,7 +129,8 @@ def read_status_regs():
 
 @click.command()
 @click.option('--config', default="default", type=str, help="Config file to use")
-def main(config):
+@click.option('--config_dir', type=str, default=None, help="Base directory for config files")
+def main(config, config_dir):
 	global UNITS
 	global mqtt
 	global mqtt_queue
@@ -141,11 +140,11 @@ def main(config):
 
 	logger.info("Starting up...")
 
-	cfg = load_config(config,subpath="mqtt2modbus")
+	cfg = load_config(config,subpath="mqtt2modbus",config_dir=config_dir)
 	UNITS = cfg["units"]
 
 
-	therm_names = load_config("therm_names")
+	therm_names = load_config("therm_names",config_dir=config_dir)
 
 	mqtt_queue = PriorityQueue()
 

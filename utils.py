@@ -5,7 +5,7 @@ from pathlib import Path
 from functools import total_ordering
 import yaml
 
-CONFIG_DIR = 'config'
+CONFIG_DIR = Path.home() / 'config'
 
 class ModbusFunc(Enum):
 	READ_HOLDING = auto()
@@ -76,8 +76,10 @@ class ThermometerData(object):
 	def to_dict(self):
 		return {"address": self.address, "temperature": self.temperature, "name": self.name}
 
-def load_config(filename,subpath=""):
-	basedir = Path.home() / Path(CONFIG_DIR) / subpath
+def load_config(filename,subpath="",config_dir=None):
+	if config_dir is None:
+		config_dir = CONFIG_DIR
+	basedir = Path(config_dir) / subpath
 	filename = Path(filename)
 	if filename.suffix == '':
 		filename = filename.with_suffix('.yaml')
