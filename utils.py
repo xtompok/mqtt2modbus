@@ -7,6 +7,10 @@ import yaml
 
 CONFIG_DIR = Path.home() / 'config'
 
+def to_int16(reg):
+	"""Reinterpret an unsigned 16-bit Modbus register as a signed int16."""
+	return reg - 0x10000 if reg >= 0x8000 else reg
+
 class ModbusFunc(Enum):
 	READ_HOLDING = auto()
 	READ_INPUT = auto()
@@ -69,12 +73,27 @@ class ThermometerData(object):
 			name = namedict[address]
 		else:
 			name = address
-		temperature = regs[4]/100
+		temperature = to_int16(regs[4])/100
 		return cls(address = address, temperature = temperature, name = name)
 	def __str__(self):
 		return f"Thermometer: address: {self.address}, temperature [deg C]: {self.temperature}"
 	def to_dict(self):
 		return {"address": self.address, "temperature": self.temperature, "name": self.name}
+
+@dataclass
+class SHT30Data(object):
+	temperature: float
+	humidity: float
+
+	@classmethod
+	def from_regs(cls,regs):
+		if len(regs) != 2:
+			return None
+		return cls(temperature = to_int16(regs[0])/100, humidity = regs[1]/100)
+	def __str__(self):
+		return f"SHT30: temperature [deg C]: {self.temperature}, humidity [%RH]: {self.humidity}"
+	def to_dict(self):
+		return {"temperature": self.temperature, "humidity": self.humidity}
 
 def load_config(filename,subpath="",config_dir=None):
 	if config_dir is None:

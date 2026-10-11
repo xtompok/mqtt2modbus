@@ -16,7 +16,7 @@ from pymodbus.exceptions import ModbusIOException
 
 import paho.mqtt.client as mqtt_client
 from paho.mqtt.enums import CallbackAPIVersion
-from utils import ModbusFunc, ModbusMsg, ModbusMsgBlock, ModuleStatus, ThermometerData, load_config
+from utils import ModbusFunc, ModbusMsg, ModbusMsgBlock, ModuleStatus, ThermometerData, SHT30Data, load_config
 
 def _log_uncaught(atype, value, tb):
 	logger.error(f"Uncaught exception: {str(atype)} : {value}", exc_info=(atype, value, tb))
@@ -115,6 +115,22 @@ def publish_thermometer(unit,resps):
 
 
 
+def publish_sht30(unit,resps):
+	data = SHT30Data.from_regs(resps[0])
+	if data is None:
+		# Firmware answers exception 02 when the reading is stale (sensor unplugged or I2C fault).
+		if unit not in sht30_stale:
+			logger.warning(f"Unit {unit}: SHT30 reading not available (stale or missing)")
+			sht30_stale.add(unit)
+		return
+	if unit in sht30_stale:
+		logger.info(f"Unit {unit}: SHT30 reading available again")
+		sht30_stale.discard(unit)
+	msg = {"id": "modbus", "type": "sht30", "unit": unit, "timestamp": time.time()} | data.to_dict()
+	mqtt.publish("modbus/sht30", json.dumps(msg))
+	logger.debug((unit,data))
+
+
 def read_status_regs():
 	for unit in UNITS:
 		msgs = []
@@ -125,6 +141,9 @@ def read_status_regs():
 		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 200, nregs=5))
 		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 205, nregs=5))
 		mqtt_queue.put(ModbusMsgBlock(msgs=msgs, callback=publish_thermometer))
+		if unit in SHT30_UNITS:
+			msgs = [ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 40, nregs=2)]
+			mqtt_queue.put(ModbusMsgBlock(msgs=msgs, callback=publish_sht30))
 	threading.Timer(1,read_status_regs).start()
 
 @click.command()
@@ -132,6 +151,8 @@ def read_status_regs():
 @click.option('--config_dir', type=str, default=None, help="Base directory for config files")
 def main(config, config_dir):
 	global UNITS
+	global SHT30_UNITS
+	global sht30_stale
 	global mqtt
 	global mqtt_queue
 	global client
@@ -142,6 +163,9 @@ def main(config, config_dir):
 
 	cfg = load_config(config,subpath="mqtt2modbus",config_dir=config_dir)
 	UNITS = cfg["units"]
+	# Units carrying an SHT30 (input registers 40/41); optional, defaults to none.
+	SHT30_UNITS = cfg.get("sht30_units", []) or []
+	sht30_stale = set()
 
 
 	therm_names = load_config("therm_names",config_dir=config_dir)
