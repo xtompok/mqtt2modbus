@@ -10,6 +10,7 @@ port:
   timeout: 0.1
   baudrate: 115200
 units: [101]        # unit IDs to poll
+n_thermometers: 8   # optional: DS18B20 slots to poll per unit (default 2)
 sht30_units: [101]  # optional: units carrying an SHT30 (input registers 40/41)
 ```
 

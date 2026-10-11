@@ -108,7 +108,8 @@ def publish_thermometer(unit,resps):
 	for resp in resps:
 		data = ThermometerData.from_regs(resp,therm_names)
 		if data is None:
-			return
+			# Empty or stale slot (exception 02 -> empty register list).
+			continue
 		msg = {"id": "modbus", "type": "thermometer", "unit": unit, "timestamp": time.time()} | data.to_dict()
 		mqtt.publish("modbus/thermometer", json.dumps(msg))
 		logger.debug((unit,data))
@@ -137,9 +138,11 @@ def read_status_regs():
 		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 5, nregs=4))
 		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_HOLDING, reg = 1, nregs=2))
 		mqtt_queue.put(ModbusMsgBlock(msgs=msgs, callback=publish_status_regs))
-		msgs = []
-		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 200, nregs=5))
-		msgs.append(ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 205, nregs=5))
+		# One 5-register read per thermometer slot (200 + 5*n). Each slot is
+		# read separately because the firmware answers exception 02 for an
+		# empty/stale slot and a multi-register read would fail as a whole.
+		msgs = [ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 200 + 5*n, nregs=5)
+				for n in range(N_THERMOMETERS)]
 		mqtt_queue.put(ModbusMsgBlock(msgs=msgs, callback=publish_thermometer))
 		if unit in SHT30_UNITS:
 			msgs = [ModbusMsg(unit=unit, func=ModbusFunc.READ_INPUT, reg = 40, nregs=2)]
@@ -151,6 +154,7 @@ def read_status_regs():
 @click.option('--config_dir', type=str, default=None, help="Base directory for config files")
 def main(config, config_dir):
 	global UNITS
+	global N_THERMOMETERS
 	global SHT30_UNITS
 	global sht30_stale
 	global mqtt
@@ -163,6 +167,9 @@ def main(config, config_dir):
 
 	cfg = load_config(config,subpath="mqtt2modbus",config_dir=config_dir)
 	UNITS = cfg["units"]
+	# Thermometer slots to poll per unit (5 input registers each from 200).
+	# Old 1-Wire firmware and the LED boards expose 2, the 8-sensor firmware 8.
+	N_THERMOMETERS = int(cfg.get("n_thermometers", 2))
 	# Units carrying an SHT30 (input registers 40/41); optional, defaults to none.
 	SHT30_UNITS = cfg.get("sht30_units", []) or []
 	sht30_stale = set()
